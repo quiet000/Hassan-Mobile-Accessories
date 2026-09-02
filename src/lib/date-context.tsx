@@ -20,7 +20,7 @@ interface DateContextValue {
 const DateContext = createContext<DateContextValue | null>(null);
 
 export function DateProvider({ children }: { children: ReactNode }) {
-  const [filter, setFilter] = useState<DateFilter>("today");
+  const [filter, setFilter] = useState<DateFilter>("month");
   const [customRange, setCustomRange] = useState<DateRange>({
     from: new Date(),
     to: new Date(),
