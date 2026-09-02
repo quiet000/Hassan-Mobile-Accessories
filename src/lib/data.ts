@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import type {
   Order,
+  Sale,
   TopProduct,
   DailySales,
   OrderStatusCount,
@@ -19,6 +20,7 @@ function localToUTC(date: Date): string {
 
 export interface DashboardData {
   orders: Order[];
+  sales: Sale[];
   todayCount: number;
   todayTotal: number;
   yesterdayCount: number;
@@ -42,6 +44,7 @@ export async function getDashboardData(from: Date, to: Date): Promise<DashboardD
   const [
     ordersResult,
     notificationsResult,
+    salesResult,
     todayCountResult,
     todayTotalResult,
     yesterdayCountResult,
@@ -56,6 +59,12 @@ export async function getDashboardData(from: Date, to: Date): Promise<DashboardD
     supabase
       .from("notifications")
       .select("order_id, waybill_number"),
+    supabase
+      .from("sales")
+      .select("*, item:item(*)")
+      .gte("created_at", localToUTC(fromStart))
+      .lte("created_at", localToUTC(toEnd))
+      .order("created_at", { ascending: false }),
     supabase
       .from("orders")
       .select("id", { count: "exact", head: true })
@@ -91,7 +100,49 @@ export async function getDashboardData(from: Date, to: Date): Promise<DashboardD
   const yesterdayCount = yesterdayCountResult.count || 0;
   const yesterdayTotal = (yesterdayTotalResult.data as { total: number }[] || []).reduce((s, o) => s + (o.total || 0), 0);
 
-  // Top products — only from orders that have order_items
+  const sales = (salesResult.data || []) as Sale[];
+
+  // Sales within today / yesterday date windows
+  const todaySales = sales.filter((s) => {
+    const d = new Date(s.created_at);
+    return d >= todayStart && d <= todayEnd;
+  });
+  const yesterdaySales = sales.filter((s) => {
+    const d = new Date(s.created_at);
+    return d >= yesterdayDate && d <= yesterdayEnd;
+  });
+  const todaySalesTotal = todaySales.reduce((sum, s) => sum + s.sale_price * s.quantity, 0);
+  const yesterdaySalesTotal = yesterdaySales.reduce((sum, s) => sum + s.sale_price * s.quantity, 0);
+
+  // Daily sales — merge orders + branch sales
+  const dailyMap = new Map<string, { count: number; total: number }>();
+  for (const order of orders) {
+    const dateStr = order.created_at.split("T")[0];
+    const amount = order.subtotal || order.total || 0;
+    const existing = dailyMap.get(dateStr);
+    if (existing) {
+      existing.count += 1;
+      existing.total += amount;
+    } else {
+      dailyMap.set(dateStr, { count: 1, total: amount });
+    }
+  }
+  for (const sale of sales) {
+    const dateStr = sale.created_at.split("T")[0];
+    const amount = sale.sale_price * sale.quantity;
+    const existing = dailyMap.get(dateStr);
+    if (existing) {
+      existing.count += 1;
+      existing.total += amount;
+    } else {
+      dailyMap.set(dateStr, { count: 1, total: amount });
+    }
+  }
+  const dailySales = Array.from(dailyMap.entries())
+    .map(([date, values]) => ({ date, ...values }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Top products — from orders that have order_items + branch sales
   const productMap = new Map<string, TopProduct>();
   for (const order of orders) {
     if (!order.order_items || order.order_items.length === 0) continue;
@@ -110,26 +161,24 @@ export async function getDashboardData(from: Date, to: Date): Promise<DashboardD
       }
     }
   }
+  for (const sale of sales) {
+    const pname = sale.item?.["Product Name"] || sale.item?.SKU || "مبيعات فرع";
+    const existing = productMap.get(pname);
+    if (existing) {
+      existing.total_quantity += sale.quantity;
+      existing.total_revenue += sale.sale_price * sale.quantity;
+    } else {
+      productMap.set(pname, {
+        product_name: pname,
+        product_id: sale.item?.SKU || sale.item?.id || "",
+        total_quantity: sale.quantity,
+        total_revenue: sale.sale_price * sale.quantity,
+      });
+    }
+  }
   const topProducts = Array.from(productMap.values())
     .sort((a, b) => b.total_revenue - a.total_revenue)
     .slice(0, 10);
-
-  // Daily sales — use subtotal (which always has value) or total
-  const dailyMap = new Map<string, { count: number; total: number }>();
-  for (const order of orders) {
-    const dateStr = order.created_at.split("T")[0];
-    const amount = order.subtotal || order.total || 0;
-    const existing = dailyMap.get(dateStr);
-    if (existing) {
-      existing.count += 1;
-      existing.total += amount;
-    } else {
-      dailyMap.set(dateStr, { count: 1, total: amount });
-    }
-  }
-  const dailySales = Array.from(dailyMap.entries())
-    .map(([date, values]) => ({ date, ...values }))
-    .sort((a, b) => a.date.localeCompare(b.date));
 
   // Status counts
   const statusMap = new Map<string, number>();
@@ -144,10 +193,11 @@ export async function getDashboardData(from: Date, to: Date): Promise<DashboardD
 
   return {
     orders,
-    todayCount,
-    todayTotal,
-    yesterdayCount,
-    yesterdayTotal,
+    sales,
+    todayCount: todayCount + todaySales.length,
+    todayTotal: todayTotal + todaySalesTotal,
+    yesterdayCount: yesterdayCount + yesterdaySales.length,
+    yesterdayTotal: yesterdayTotal + yesterdaySalesTotal,
     topProducts,
     dailySales,
     statusCounts,

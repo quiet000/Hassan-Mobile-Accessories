@@ -6,6 +6,7 @@ import KPICards from "@/components/KPICards";
 import SalesTrendChart from "@/components/SalesTrendChart";
 import TopProductsChart from "@/components/TopProductsChart";
 import OrderStatusPie from "@/components/OrderStatusPie";
+import BranchSalesTable from "@/components/BranchSalesTable";
 import SalesTable from "@/components/SalesTable";
 
 export default function DashboardPage() {
@@ -37,6 +38,8 @@ export default function DashboardPage() {
           </div>
 
           <TopProductsChart />
+
+          <BranchSalesTable />
 
           <SalesTable />
         </main>

@@ -26,7 +26,7 @@ export default function KPICards() {
     );
   }
 
-  const { todayCount, todayTotal, yesterdayCount, yesterdayTotal, orders } = data;
+  const { todayCount, todayTotal, yesterdayCount, yesterdayTotal, orders, sales } = data;
 
   const countDiff = yesterdayCount > 0
     ? ((todayCount - yesterdayCount) / yesterdayCount) * 100
@@ -35,7 +35,8 @@ export default function KPICards() {
     ? ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100
     : todayTotal > 0 ? 100 : 0;
 
-  const periodTotal = orders.reduce((sum, o) => sum + (o.subtotal || o.total || 0), 0);
+  const periodTotal = orders.reduce((sum, o) => sum + (o.subtotal || o.total || 0), 0)
+    + sales.reduce((sum, s) => sum + (s.sale_price * s.quantity), 0);
   const ordersWithItems = orders.filter((o) => o.order_items && o.order_items.length > 0).length;
   const ordersWithoutItems = orders.length - ordersWithItems;
 
